@@ -215,7 +215,7 @@ def check_media_tools(project_root):
             "name": "ffmpeg / ffprobe（乾坤大挪移未就位，退化为直探%s）" % bundled,
             "required": True, "ok": bool(ff and fp),
             "detail": "ffmpeg=%s ffprobe=%s" % (ff or "missing", fp or "missing"),
-            "fix": "安装 ffmpeg（含 ffprobe），或先克隆乾坤大挪移",
+            "fix": "跑 bash scripts/install_ffmpeg.sh 装一份独立的，或先克隆乾坤大挪移",
         }]
     out = run([sys.executable, script, "--json"], timeout=60)
     try:
@@ -233,7 +233,7 @@ def check_media_tools(project_root):
             "id": key, "name": label, "required": True,
             "ok": bool(t.get(key, {}).get("path")),
             "detail": (t.get(key, {}).get("version") or "missing"),
-            "fix": "安装 %s" % label,
+            "fix": "跑 bash scripts/install_ffmpeg.sh 装一份独立的 %s" % label,
         })
     items.append({
         "id": "yt-dlp", "name": "yt-dlp（平台页链接下载，可选）", "required": False,
@@ -251,8 +251,7 @@ def check_media_tools(project_root):
         "required": False, "ok": not borrowed,
         "detail": ("借用 node_modules 捆绑件：%s" % "、".join(borrowed)) if borrowed
                   else "系统级安装或 standalone",
-        "fix": "建议装一份系统级 ffmpeg/ffprobe：当前它们来自其他 skill 的 node_modules，"
-               "那个 skill 被卸载/更新后本流水线会连带失效",
+        "fix": "跑 bash scripts/install_ffmpeg.sh 装一份独立的（免 sudo / 免 Homebrew，含 SHA-256 校验）",
     })
     return items
 

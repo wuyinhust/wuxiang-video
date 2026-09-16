@@ -48,6 +48,10 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 **预检未通过时怎么办**：
 1. 若缺的是**凭据** → 把预检末尾「需要用户提供的内容」整段发给用户，一次要齐
 2. 若缺的是**软件/仓库/网络** → 说明缺什么、影响哪一阶段，**取得用户同意后**再装（不静默安装系统软件）
+3. 若缺的是 **ffmpeg/ffprobe**，或预检报「媒体二进制来源稳固」未过 → 跑 `bash scripts/install_ffmpeg.sh`
+   装一份独立的（自带 SHA-256 校验，免 sudo、免 Homebrew，默认落 `~/.local/bin`）。
+   **不要**让流水线长期依赖其他 skill 的 node_modules 捆绑件——那个 skill 一卸载，
+   抽帧与分镜会连带失效，而报错不会指向真正原因
 3. 全绿后再向用户确认配音路线与合规边界，进入第〇步
 
 ## 第〇步：开工前必须锁定的两个决策（最重要，跳过必返工）
@@ -102,7 +106,7 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 3. 火山 TTS 鉴权头必须是 `Authorization: Bearer;<token>`（**分号**，不是空格），写成 `Bearer <token>` 直接 401
 4. 火山 TTS 先 `--check` 再批量——一次验证 appid/token/音色；鉴权与音色问题是**不可重试**错误，脚本会快速退出并给建议
 5. 火山 TTS 单段文本上限 1024 字节（建议 <300 字），按叙事段切分天然满足；"豆包语音合成模型2.0"音色（`*_uranus_bigtts`）需 v3 接口，v1 不支持
-6. **ffmpeg/ffprobe 的来源要稳固**：预检会提示是否"借用其他 skill 的 node_modules 捆绑件"——是的话建议装系统级，否则那个 skill 一卸载整条流水线连带失效
+6. **ffmpeg/ffprobe 的来源要稳固**：预检会提示是否"借用其他 skill 的 node_modules 捆绑件"——是的话跑 `bash scripts/install_ffmpeg.sh` 装一份独立的（macOS 原生 arm64 静态构建、SHA-256 校验、免 sudo/Homebrew），否则那个 skill 一卸载，抽帧与分镜连带静默失效。
 7. Remotion 渲染用系统 Chrome（`--browser-executable`），跳过 ~130MB Headless 下载
 8. 长命令脚本化：后台任务 shell 不保留 cwd，cd 必须写在脚本内
 9. HuggingFace 被代理拦截：`HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1`

@@ -42,6 +42,24 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读
 （复用乾坤大挪移的 `check_environment.py`）、依赖仓库、网络可达性；再按路线校验凭据。
 未通过时会把「需要用户提供的凭据」单独列出来，便于一次性索取。
 
+### ffmpeg / ffprobe：装一份自己的，别借别人的
+
+乾坤大挪移的媒体工具链会一路找到 `~/.codex/skills/*/node_modules` 里 `ffmpeg-static`
+之类的**捆绑二进制**。在没有系统 ffmpeg 的机器上那样确实能跑通，但那个 skill 一卸载或更新，
+抽帧与分镜就会静默失效，而报错不会指向真正原因。
+
+预检因此会单独盯一件事：**媒体二进制来源是否稳固**。没过就跑这个脚本，装一份独立的：
+
+```bash
+bash scripts/install_ffmpeg.sh              # 默认装到 ~/.local/bin
+bash scripts/install_ffmpeg.sh --check      # 只体检，看当前来源是否独立
+bash scripts/install_ffmpeg.sh --proxy http://127.0.0.1:7890
+bash scripts/install_ffmpeg.sh --force      # 同版本也重装
+```
+
+macOS 原生 arm64/amd64 静态构建，强制 SHA-256 校验（不通过即中止、绝不安装），
+免 Homebrew、免 sudo，装完自动清 quarantine 扩展属性。幂等：版本一致时直接跳过。
+
 ### 凭据清单
 
 | 凭据 | 环境变量 | 何时必需 | 从哪里拿 |
@@ -62,6 +80,7 @@ SKILL.md                      技能主文档（预检 + 六段流水线 + 决�
 .gitignore                    预置凭据与生成物忽略规则
 scripts/
 ├── preflight.py              安装预检：凭据 / 运行时 / 媒体工具链 / 依赖仓库 / 网络（只读）
+├── install_ffmpeg.sh         装独立 ffmpeg/ffprobe（SHA-256 校验，免 sudo / 免 Homebrew）
 ├── creds.example.json        凭据模板（复制为 creds.json 并填入）
 ├── align_subtitles.py        字幕对齐器：原稿 + faster-whisper 词级时间戳 → SRT
 ├── volcano_tts_batch.py      火山引擎 TTS 批量配音（路线 B）+ 主音轨拼接 + 音量归一
@@ -72,7 +91,8 @@ scripts/
 
 - [qiankun-video-shift](https://github.com/wuyinhust/qiankun-video-shift)（拆解前三式）
 - [video-talkcraft](https://github.com/Vincentwei1021/video-talkcraft)（Remotion 剪辑）
-- Python 3 + ffmpeg/ffprobe + Node 22+
+- Python 3 + Node 22+
+- ffmpeg / ffprobe —— 用 `scripts/install_ffmpeg.sh` 装一份独立的（**不要**依赖其他 skill 的捆绑件）
 - faster-whisper（词级转写）
 - 路线 B 另需火山引擎语音合成凭据（AppID / Access Token / 音色），纯 HTTPS 调用、无额外 pip 依赖
 
