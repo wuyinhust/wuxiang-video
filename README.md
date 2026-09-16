@@ -11,7 +11,7 @@
 ```
 拆解参考视频（乾坤大挪移前三式）
   → 原创同构稿件
-  → 配音（真人实录 / edge-tts / 云端 IndexTTS 三路线）
+  → 配音（真人实录 / 火山引擎 TTS 二选一）
   → 词级对齐字幕（原稿文本 + 真实语音时间，绝不用 ASR 原文）
   → Remotion 成片（1080×1920 竖屏）
   → 验收交付
@@ -31,7 +31,7 @@
 SKILL.md                      技能主文档（六段流水线 + 决策点 + 避坑清单）
 scripts/
 ├── align_subtitles.py        字幕对齐器：原稿 + faster-whisper 词级时间戳 → SRT
-├── edgetts_batch.py          edge-tts 批量配音（路线 B）+ 生成日志
+├── volcano_tts_batch.py      火山引擎 TTS 批量配音（路线 B）+ 主音轨拼接 + 音量归一
 └── render_remotion.sh        Remotion 一键渲染（系统 Chrome，免 Headless 下载）
 ```
 
@@ -40,11 +40,35 @@ scripts/
 - [qiankun-video-shift](https://github.com/wuyinhust/qiankun-video-shift)（拆解前三式）
 - [video-talkcraft](https://github.com/Vincentwei1021/video-talkcraft)（Remotion 剪辑）
 - Python 3 + ffmpeg/ffprobe + Node 22+
-- faster-whisper（词级转写）；路线 B 另需 edge-tts
+- faster-whisper（词级转写）
+- 路线 B 另需火山引擎语音合成凭据（AppID / Access Token / 音色），纯 HTTPS 调用、无额外 pip 依赖
+
+## 配音路线（二选一，不混用）
+
+| | 路线 A · 真人实录 | 路线 B · 火山引擎 TTS |
+|---|---|---|
+| 适用 | 首选，效果天花板 | 无真人出镜时的机器路线 |
+| 前置 | 带时间戳逐字稿 | AppID / Access Token / 音色 voice_type |
+| 命令 | 用户录制 → ffmpeg 提取音频 | `volcano_tts_batch.py --check` 先自检 |
+
+路线 B 完整流程：
+
+```bash
+export VOLC_TTS_APPID=...
+export VOLC_TTS_ACCESS_TOKEN=...
+export VOLC_TTS_VOICE=zh_male_M392_conversation_wvae_bigtts
+
+python3 scripts/volcano_tts_batch.py --check          # 冒烟自检：一次验证三项凭据
+
+python3 scripts/volcano_tts_batch.py segments.json --out tts/output \
+    --speed 1.15 --master tts/output/master.mp3 --normalize
+```
+
+凭据只走环境变量或 `--config creds.json`，不写入源码与仓库。
 
 ## 核心设计
 
-1. **第〇步先锁决策**：配音路线（真人实录 / edge-tts / IndexTTS）与合规边界
+1. **第〇步先锁决策**：配音路线（真人实录 / 火山引擎 TTS，**二选一，不混用**）与合规边界
    （录屏界面与参考片真人肖像不进成片）开工前定死——最大的返工来源。
 2. **自动切镜不可信**：每 2 秒补抽帧，按叙事人工细分 8–10 段。
 3. **字幕铁律**：字幕 = 原稿文本 + 真实语音词级时间，绝不直接用 ASR 原文
