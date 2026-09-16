@@ -1,0 +1,6 @@
+{
+  "appid": "你的火山引擎 AppID",
+  "access_token": "你的火山引擎 Access Token",
+  "cluster": "volcano_tts",
+  "voice": "zh_male_M392_conversation_wvae_bigtts"
+}

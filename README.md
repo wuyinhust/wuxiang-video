@@ -25,11 +25,44 @@
 - "复刻这条参考视频，主题换成 XX"
 - "拆解这条爆款并仿拍一条"
 
+**首次使用**会先跑安装预检，并向你一次性索取所需的凭据（见下）。
+
+## 安装后第一件事：跑预检、把凭据一次要齐
+
+**新机器装完 skill 后，先跑预检再开工。** 预检是只读的——不安装任何软件、不写入任何文件：
+
+```bash
+python3 scripts/preflight.py --project-root .            # 两条路线都按必需校验
+python3 scripts/preflight.py --project-root . --route A  # 已定真人实录：不要求 TTS 凭据
+python3 scripts/preflight.py --project-root . --route B  # 已定火山 TTS：凭据缺失即失败
+python3 scripts/preflight.py --project-root . --json     # 机器可读
+```
+
+它盘四类前置：运行时（Python / Node / npm / git / faster-whisper / Chrome）、媒体工具链
+（复用乾坤大挪移的 `check_environment.py`）、依赖仓库、网络可达性；再按路线校验凭据。
+未通过时会把「需要用户提供的凭据」单独列出来，便于一次性索取。
+
+### 凭据清单
+
+| 凭据 | 环境变量 | 何时必需 | 从哪里拿 |
+|---|---|---|---|
+| 火山引擎 AppID | `VOLC_TTS_APPID` | 路线 B | 火山引擎控制台 → 语音技术 → 语音合成 → 应用管理 |
+| 火山引擎 Access Token | `VOLC_TTS_ACCESS_TOKEN` | 路线 B | 同上（与 AppID 同页） |
+| 火山引擎音色 voice_type | `VOLC_TTS_VOICE` | 路线 B | 控制台音色列表；**须已下单/授权** |
+| 业务集群 | `VOLC_TTS_CLUSTER` | 一般不用 | 默认 `volcano_tts` |
+| GitHub 凭据 | `GITHUB_TOKEN` | 仅私有仓库 / 发布产物 | classic PAT（`repo` scope） |
+
+取值优先级：命令行参数 > `--config creds.json` > 环境变量。模板见 `scripts/creds.example.json`。
+**凭据不入源码、不入仓库、不进报告**——`.gitignore` 已预置 `creds.json` / `*.env`。
+
 ## 仓库结构
 
 ```
-SKILL.md                      技能主文档（六段流水线 + 决策点 + 避坑清单）
+SKILL.md                      技能主文档（预检 + 六段流水线 + 决策点 + 避坑清单）
+.gitignore                    预置凭据与生成物忽略规则
 scripts/
+├── preflight.py              安装预检：凭据 / 运行时 / 媒体工具链 / 依赖仓库 / 网络（只读）
+├── creds.example.json        凭据模板（复制为 creds.json 并填入）
 ├── align_subtitles.py        字幕对齐器：原稿 + faster-whisper 词级时间戳 → SRT
 ├── volcano_tts_batch.py      火山引擎 TTS 批量配音（路线 B）+ 主音轨拼接 + 音量归一
 └── render_remotion.sh        Remotion 一键渲染（系统 Chrome，免 Headless 下载）
@@ -68,12 +101,15 @@ python3 scripts/volcano_tts_batch.py segments.json --out tts/output \
 
 ## 核心设计
 
-1. **第〇步先锁决策**：配音路线（真人实录 / 火山引擎 TTS，**二选一，不混用**）与合规边界
-   （录屏界面与参考片真人肖像不进成片）开工前定死——最大的返工来源。
-2. **自动切镜不可信**：每 2 秒补抽帧，按叙事人工细分 8–10 段。
-3. **字幕铁律**：字幕 = 原稿文本 + 真实语音词级时间，绝不直接用 ASR 原文
+1. **先预检再开工**：新机器装完先跑 `preflight.py`，凭据一次要齐——走到阶段 3 才发现没有
+   配音凭据，是最大的返工来源。
+2. **第〇步先锁决策**：配音路线（真人实录 / 火山引擎 TTS，**二选一，不混用**）与合规边界
+   （录屏界面与参考片真人肖像不进成片）开工前定死。
+3. **自动切镜不可信**：每 2 秒补抽帧，按叙事人工细分 8–10 段。
+4. **字幕铁律**：字幕 = 原稿文本 + 真实语音词级时间，绝不直接用 ASR 原文
    （生造词必被转写错）。
-4. **真实原则**：演示素材用本项目真实拆解产物，不虚构功能、数据、评价。
+5. **真实原则**：演示素材用本项目真实拆解产物，不虚构功能、数据、评价。
+6. **凭据纪律**：凭据只走环境变量 / `--config`，不入源码、不入仓库、不进报告。
 
 ## 基准
 

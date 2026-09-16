@@ -1,0 +1,15 @@
+# 凭据：绝不入库
+creds.json
+credentials.json
+*.env
+.env
+
+# 大模型/媒体生成物
+tts/
+output/
+out/
+node_modules/
+
+# Python
+__pycache__/
+*.pyc

@@ -11,6 +11,45 @@ metadata:
 
 **依赖**：乾坤大挪移仓库（`git clone https://github.com/wuyinhust/qiankun-video-shift.git tools/qiankun-video-shift`，按其 SKILL.md 执行前三式）、video-talkcraft（Remotion 剪辑，`git clone https://github.com/Vincentwei1021/video-talkcraft.git tools/video-talkcraft`）、Python 3 + ffmpeg/ffprobe + Node 22+、faster-whisper（词级转写）。路线 B 只需火山引擎语音合成的三项凭据，纯 HTTPS 调用、无额外 pip 依赖。
 
+## 安装后第一件事：跑预检、把凭据一次要齐（新机器必做）
+
+**在开工之前先执行预检；凭据没齐，不要进入第〇步。**
+
+```bash
+python3 scripts/preflight.py --project-root .            # 两条路线都按必需校验
+python3 scripts/preflight.py --project-root . --route A  # 已定真人实录：不要求 TTS 凭据
+python3 scripts/preflight.py --project-root . --route B  # 已定火山 TTS：凭据缺失即失败
+python3 scripts/preflight.py --project-root . --json     # 机器可读（便于程序化判断）
+```
+
+预检盘四类前置（**只读**，不安装任何东西、不写入任何文件）：
+
+| 类别 | 内容 |
+|---|---|
+| 运行时 | Python ≥3.10、Node ≥22、npm、git、faster-whisper、系统 Chrome |
+| 媒体工具链 | 复用乾坤大挪移 `scripts/check_environment.py --json`（ffmpeg/ffprobe/yt-dlp） |
+| 依赖仓库 | `tools/qiankun-video-shift`、`tools/video-talkcraft` 是否就位及 SHA |
+| 网络 | github.com、hf-mirror.com、（路线 B）openspeech.bytedance.com |
+
+### 凭据清单（一次性索取，禁止在流水线中途要）
+
+| 凭据 | 环境变量 | 何时必需 | 从哪里拿 |
+|---|---|---|---|
+| 火山引擎 AppID | `VOLC_TTS_APPID` | 路线 B | 火山引擎控制台 → 语音技术 → 语音合成 → 应用管理 |
+| 火山引擎 Access Token | `VOLC_TTS_ACCESS_TOKEN` | 路线 B | 同上（与 AppID 同页） |
+| 火山引擎音色 voice_type | `VOLC_TTS_VOICE` | 路线 B | 控制台音色列表；**须已下单/授权**（免费音色也要 0 元下单） |
+| 业务集群 | `VOLC_TTS_CLUSTER` | 一般不用 | 默认 `volcano_tts` |
+| GitHub 凭据 | `GITHUB_TOKEN` | 仅私有仓库 clone / 发布产物 | classic PAT（`repo` scope） |
+
+取值优先级：命令行参数 > `--config creds.json` > 环境变量。模板见 `scripts/creds.example.json`。
+
+**凭据纪律**：不入源码、不入仓库、不写进报告与日志；对外只出现脱敏形式（预检默认已脱敏）。
+
+**预检未通过时怎么办**：
+1. 若缺的是**凭据** → 把预检末尾「需要用户提供的内容」整段发给用户，一次要齐
+2. 若缺的是**软件/仓库/网络** → 说明缺什么、影响哪一阶段，**取得用户同意后**再装（不静默安装系统软件）
+3. 全绿后再向用户确认配音路线与合规边界，进入第〇步
+
 ## 第〇步：开工前必须锁定的两个决策（最重要，跳过必返工）
 
 1. **配音路线（二选一，先问用户）**——一条片子只走一条路线，不混用；**不使用 edge-tts / IndexTTS**：
@@ -58,18 +97,20 @@ metadata:
 
 ## 避坑清单（按收益排序）
 
-1. 配音路线与合规边界开工前定死——最大返工来源
-2. 火山 TTS 鉴权头必须是 `Authorization: Bearer;<token>`（**分号**，不是空格），写成 `Bearer <token>` 直接 401
-3. 火山 TTS 先 `--check` 再批量——一次验证 appid/token/音色；鉴权与音色问题是**不可重试**错误，脚本会快速退出并给建议
-4. 火山 TTS 单段文本上限 1024 字节（建议 <300 字），按叙事段切分天然满足；"豆包语音合成模型2.0"音色（`*_uranus_bigtts`）需 v3 接口，v1 不支持
-5. Remotion 渲染用系统 Chrome（`--browser-executable`），跳过 ~130MB Headless 下载
-6. 长命令脚本化：后台任务 shell 不保留 cwd，cd 必须写在脚本内
-7. HuggingFace 被代理拦截：`HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1`
-8. pip 装 sdist 包报 EEXIST：`env -u PYTHONPATH pip install`
-9. GitHub 慢/断流：`git -c http.version=HTTP/1.1 clone --depth 1 --single-branch`，codeload tarball 兜底
-10. zsh：`rm -f` 匹配不到的 glob 会中断整条命令链
-11. npm/pip/模型下载全部后台并行，等待期做分析、写稿
-12. 抽帧成本控制：先低分辨率筛、关键段再全尺寸；验收抽帧每场景 1 帧即可
+1. **新机器先跑 `preflight.py`，凭据一次要齐**——走到阶段 3 才发现没有配音凭据 = 最大返工来源
+2. 配音路线与合规边界开工前定死
+3. 火山 TTS 鉴权头必须是 `Authorization: Bearer;<token>`（**分号**，不是空格），写成 `Bearer <token>` 直接 401
+4. 火山 TTS 先 `--check` 再批量——一次验证 appid/token/音色；鉴权与音色问题是**不可重试**错误，脚本会快速退出并给建议
+5. 火山 TTS 单段文本上限 1024 字节（建议 <300 字），按叙事段切分天然满足；"豆包语音合成模型2.0"音色（`*_uranus_bigtts`）需 v3 接口，v1 不支持
+6. **ffmpeg/ffprobe 的来源要稳固**：预检会提示是否"借用其他 skill 的 node_modules 捆绑件"——是的话建议装系统级，否则那个 skill 一卸载整条流水线连带失效
+7. Remotion 渲染用系统 Chrome（`--browser-executable`），跳过 ~130MB Headless 下载
+8. 长命令脚本化：后台任务 shell 不保留 cwd，cd 必须写在脚本内
+9. HuggingFace 被代理拦截：`HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1`
+10. pip 装 sdist 包报 EEXIST：`env -u PYTHONPATH pip install`
+11. GitHub 慢/断流：`git -c http.version=HTTP/1.1 clone --depth 1 --single-branch`，codeload tarball 兜底
+12. zsh：`rm -f` 匹配不到的 glob 会中断整条命令链
+13. npm/pip/模型下载全部后台并行，等待期做分析、写稿
+14. 抽帧成本控制：先低分辨率筛、关键段再全尺寸；验收抽帧每场景 1 帧即可
 
 ## 基准
 
