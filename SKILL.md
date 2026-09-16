@@ -52,6 +52,22 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
    装一份独立的（自带 SHA-256 校验，免 sudo、免 Homebrew，默认落 `~/.local/bin`）。
    **不要**让流水线长期依赖其他 skill 的 node_modules 捆绑件——那个 skill 一卸载，
    抽帧与分镜会连带失效，而报错不会指向真正原因
+
+### 流水线用哪个 Python 解释器（别用裸 `python3`）
+
+预检报告头会给出「流水线解释器」，**后续所有 Python 脚本都用它跑**：
+
+```
+流水线解释器：/Users/…/python/envs/default/bin/python
+```
+
+原因：faster-whisper 等依赖装在隔离 venv 里，而 PATH 中 `python3` 往往先解析到
+**没有依赖的那个**解释器。直接 `python3 scripts/align_subtitles.py` 会 `ImportError`，
+跑预检也会误报"缺 faster-whisper"（依赖明明装着）。
+
+预检因此不假定当前解释器，而是按 当前解释器 → `envs/default` → `.venv` → `venv` → `env`
+的顺序找一个**实跑 `import faster_whisper` 成功**的解释器（只看目录存在不够，
+目录在而依赖没装很常见）。
 3. 全绿后再向用户确认配音路线与合规边界，进入第〇步
 
 ## 第〇步：开工前必须锁定的两个决策（最重要，跳过必返工）
@@ -107,14 +123,16 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 4. 火山 TTS 先 `--check` 再批量——一次验证 appid/token/音色；鉴权与音色问题是**不可重试**错误，脚本会快速退出并给建议
 5. 火山 TTS 单段文本上限 1024 字节（建议 <300 字），按叙事段切分天然满足；"豆包语音合成模型2.0"音色（`*_uranus_bigtts`）需 v3 接口，v1 不支持
 6. **ffmpeg/ffprobe 的来源要稳固**：预检会提示是否"借用其他 skill 的 node_modules 捆绑件"——是的话跑 `bash scripts/install_ffmpeg.sh` 装一份独立的（macOS 原生 arm64 静态构建、SHA-256 校验、免 sudo/Homebrew），否则那个 skill 一卸载，抽帧与分镜连带静默失效。
-7. Remotion 渲染用系统 Chrome（`--browser-executable`），跳过 ~130MB Headless 下载
-8. 长命令脚本化：后台任务 shell 不保留 cwd，cd 必须写在脚本内
-9. HuggingFace 被代理拦截：`HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1`
-10. pip 装 sdist 包报 EEXIST：`env -u PYTHONPATH pip install`
-11. GitHub 慢/断流：`git -c http.version=HTTP/1.1 clone --depth 1 --single-branch`，codeload tarball 兜底
-12. zsh：`rm -f` 匹配不到的 glob 会中断整条命令链
-13. npm/pip/模型下载全部后台并行，等待期做分析、写稿
-14. 抽帧成本控制：先低分辨率筛、关键段再全尺寸；验收抽帧每场景 1 帧即可
+7. **别用裸 `python3` 跑流水线 Python 脚本**：faster-whisper 等依赖装在隔离 venv 里，而 PATH 中 `python3` 常先解析到**没有依赖的那个**解释器——轻则预检误报"缺 faster-whisper"，重则 `ImportError`。以预检报告头的「流水线解释器」为准
+8. Remotion 渲染用系统 Chrome（`--browser-executable`），跳过 ~130MB Headless 下载
+9. 长命令脚本化：后台任务 shell 不保留 cwd，cd 必须写在脚本内
+10. HuggingFace 被代理拦截：`HF_ENDPOINT=https://hf-mirror.com HF_HUB_DISABLE_XET=1`
+11. pip 装 sdist 包报 EEXIST：`env -u PYTHONPATH pip install`
+12. GitHub 慢/断流：`git -c http.version=HTTP/1.1 clone --depth 1 --single-branch`，codeload tarball 兜底
+13. zsh：`rm -f` 匹配不到的 glob 会中断整条命令链
+14. npm/pip/模型下载全部后台并行，等待期做分析、写稿
+15. 抽帧成本控制：先低分辨率筛、关键段再全尺寸；验收抽帧每场景 1 帧即可
+16. **yt-dlp 的版本探测可能极慢**（PyInstaller 单文件打包，实测 18–33s，与代理/stdin 只是部分相关）：预检给乾坤大挪移的媒体检查设了 8s 上限，超时即退化为自探，不复用它的 yt-dlp 版本号。yt-dlp 只是可选工具，**不要为它加长超时**——那会让预检从 3s 变成 33s
 
 ## 基准
 

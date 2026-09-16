@@ -73,6 +73,19 @@ CHROME_CANDIDATES = [
     r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
 ]
 
+# 流水线解释器候选。PATH 里 versions/<ver>/bin 往往排在 envs/default/bin 之前，
+# 于是裸 `python3 scripts/align_subtitles.py` 会解析到没装依赖的那个解释器。
+# 所以这里不能假定 sys.executable，得实际去找一个 import 得到 faster_whisper 的。
+VENV_PYTHONS = [
+    "~/.workbuddy/binaries/python/envs/default/bin/python",
+    ".venv/bin/python",
+    "venv/bin/python",
+    "env/bin/python",
+]
+
+# 由 probe_pipeline_python() 填充；报告里会明确提示后续脚本用哪个解释器
+PIPELINE_PYTHON = None
+
 
 def mask(value: str) -> str:
     """只显示可核对的片段，不泄露完整凭据。"""
@@ -89,6 +102,34 @@ def run(cmd, timeout=30):
         return (r.stdout or r.stderr or "").strip()
     except Exception:
         return ""
+
+
+def probe_pipeline_python():
+    """挑一个真能 import faster_whisper 的解释器，返回 (ok, path, detail)。
+
+    先信当前解释器；不行就去已知 venv 里逐个实跑 import 验证——只看目录
+    存在是不够的，目录在而依赖没装的情况很常见。结果写入 PIPELINE_PYTHON。
+    """
+    global PIPELINE_PYTHON
+
+    if importlib.util.find_spec("faster_whisper") is not None:
+        PIPELINE_PYTHON = sys.executable
+        return True, sys.executable, "importable（解释器：%s）" % sys.executable
+
+    for raw in VENV_PYTHONS:
+        cand = os.path.expanduser(raw)
+        if not (os.path.isfile(cand) and os.access(cand, os.X_OK)):
+            continue
+        try:
+            r = subprocess.run([cand, "-c", "import faster_whisper"],
+                               capture_output=True, text=True, timeout=90, check=False)
+        except Exception:
+            continue
+        if r.returncode == 0:
+            PIPELINE_PYTHON = cand
+            return True, cand, "在 %s 中可用；当前解释器没有，脚本请用这个跑" % cand
+
+    return False, None, "missing"
 
 
 def first_line(text):
@@ -145,10 +186,10 @@ def check_runtime():
         "fix": "安装 git",
     })
 
-    fw = importlib.util.find_spec("faster_whisper") is not None
+    fw_ok, _fw_py, fw_detail = probe_pipeline_python()
     items.append({
-        "id": "faster-whisper", "name": "faster-whisper（词级转写）", "required": True, "ok": fw,
-        "detail": "importable" if fw else "missing（若装在独立 venv，请用该 venv 的 python 运行本脚本）",
+        "id": "faster-whisper", "name": "faster-whisper（词级转写）", "required": True, "ok": fw_ok,
+        "detail": fw_detail,
         "fix": "env -u PYTHONPATH pip install faster-whisper（避免 sdist 解包 EEXIST）",
     })
 
@@ -203,29 +244,53 @@ def resolve_media_binary(name):
     return None
 
 
+MEDIA_CHECK_TIMEOUT = 8    # 秒。该脚本内部会探 yt-dlp 版本，个别机器上很慢
+
+
+def _self_probe_media(reason):
+    """乾坤大挪移的检查脚本不可用/超时时的退化路径：自己探，并顺带判来源是否稳固。"""
+    ff, fp = resolve_media_binary("ffmpeg"), resolve_media_binary("ffprobe")
+    yt = resolve_media_binary("yt-dlp")
+    borrowed = [n for n, p in (("ffmpeg", ff), ("ffprobe", fp))
+                if p and "node_modules" in p]
+    return [
+        {
+            "id": "media-tools", "name": "ffmpeg / ffprobe（%s）" % reason,
+            "required": True, "ok": bool(ff and fp),
+            "detail": "ffmpeg=%s ffprobe=%s" % (ff or "missing", fp or "missing"),
+            "fix": "跑 bash scripts/install_ffmpeg.sh 装一份独立的",
+        },
+        {
+            "id": "yt-dlp", "name": "yt-dlp（平台页链接下载，可选）", "required": False,
+            "ok": bool(yt), "detail": (yt + "（未探版本）") if yt else "missing",
+            "fix": "仅当参考视频来自平台页面链接时需要",
+        },
+        {
+            "id": "media-binary-provenance",
+            "name": "媒体二进制来源稳固（非借用其他 skill 的捆绑件）",
+            "required": False, "ok": not borrowed,
+            "detail": ("借用 node_modules 捆绑件：%s" % "、".join(borrowed)) if borrowed
+                      else "系统级安装或 standalone",
+            "fix": "跑 bash scripts/install_ffmpeg.sh 装一份独立的",
+        },
+    ]
+
+
 def check_media_tools(project_root):
     """媒体工具链交给乾坤大挪移自己的检查脚本，避免两套标准。"""
     script = os.path.join(project_root, "tools", "qiankun-video-shift",
                           "scripts", "check_environment.py")
     if not os.path.exists(script):
-        ff, fp = resolve_media_binary("ffmpeg"), resolve_media_binary("ffprobe")
-        bundled = "（含其他 skill 捆绑件）" if ff and "node_modules" in ff else ""
-        return [{
-            "id": "media-tools",
-            "name": "ffmpeg / ffprobe（乾坤大挪移未就位，退化为直探%s）" % bundled,
-            "required": True, "ok": bool(ff and fp),
-            "detail": "ffmpeg=%s ffprobe=%s" % (ff or "missing", fp or "missing"),
-            "fix": "跑 bash scripts/install_ffmpeg.sh 装一份独立的，或先克隆乾坤大挪移",
-        }]
-    out = run([sys.executable, script, "--json"], timeout=60)
+        return _self_probe_media("乾坤大挪移未就位，退化为直探")
+    out = run([sys.executable, script, "--json"], timeout=MEDIA_CHECK_TIMEOUT)
     try:
         rep = json.loads(out)
     except ValueError:
-        return [{
-            "id": "media-tools", "name": "ffmpeg / ffprobe", "required": True, "ok": False,
-            "detail": "check_environment.py 未返回可解析 JSON",
-            "fix": "在 tools/qiankun-video-shift 下手动运行 python3 scripts/check_environment.py",
-        }]
+        # 该脚本会顺带探 yt-dlp 版本，而 yt-dlp 在部分机器上启动极慢（实测 18–33s，
+        # 只因它是 PyInstaller 单文件打包）。yt-dlp 是可选项，不值得为它拖住整个预检，
+        # 因此超时即退化为自探 —— ffmpeg/ffprobe 这两个核心结论不受影响。
+        return _self_probe_media("乾坤大挪移检查脚本 %ds 内未返回，已退化为直探"
+                                 % MEDIA_CHECK_TIMEOUT)
     t = rep.get("tools", {})
     items = []
     for key, label in (("ffmpeg", "ffmpeg"), ("ffprobe", "ffprobe")):
@@ -337,6 +402,8 @@ def main():
         "creds": check_creds(args.route),
         "network": check_network(args.route, args.offline),
     }
+    # 由 check_runtime() 内部探测得出，故在其后补写，别在字典字面量里提前读
+    report["pipeline_python"] = PIPELINE_PYTHON
 
     def missing(items, key_required="required"):
         return [i for i in items if i.get(key_required) and not i.get("ok")]
@@ -352,7 +419,10 @@ def main():
         return 0 if not blockers else 2
 
     print("小无相功 · 安装预检")
-    print("项目根：%s    配音路线：%s\n" % (root, args.route))
+    print("项目根：%s    配音路线：%s" % (root, args.route))
+    if PIPELINE_PYTHON:
+        print("流水线解释器：%s" % PIPELINE_PYTHON)
+    print()
     for title, items, req_key in (
         ("运行时", report["runtime"], "required"),
         ("媒体工具链（复用乾坤大挪移 check_environment.py）", report["media_tools"], "required"),
@@ -394,6 +464,9 @@ def main():
 
     print("✓ 预检通过，可以开工。路线 B 建议先跑：")
     print("  python3 scripts/volcano_tts_batch.py --check   # 一句话验证 appid/token/音色")
+    if PIPELINE_PYTHON and os.path.realpath(PIPELINE_PYTHON) != os.path.realpath(sys.executable):
+        print("\n注意：流水线里的 Python 脚本请用下面这个解释器跑（当前解释器没装依赖）：")
+        print("  %s scripts/align_subtitles.py …" % PIPELINE_PYTHON)
     return 0
 
 

@@ -60,6 +60,22 @@ bash scripts/install_ffmpeg.sh --force      # 同版本也重装
 macOS 原生 arm64/amd64 静态构建，强制 SHA-256 校验（不通过即中止、绝不安装），
 免 Homebrew、免 sudo，装完自动清 quarantine 扩展属性。幂等：版本一致时直接跳过。
 
+### 流水线用哪个 Python 解释器
+
+预检报告头会给出「流水线解释器」，**后续所有 Python 脚本都用它跑**：
+
+```
+流水线解释器：/Users/…/python/envs/default/bin/python
+```
+
+faster-whisper 等依赖装在隔离 venv 里，而 PATH 中 `python3` 往往先解析到**没有依赖的
+那个**解释器——直接 `python3 scripts/align_subtitles.py` 会 `ImportError`，跑预检也会
+误报"缺 faster-whisper"（依赖其实装着）。
+
+预检因此不假定当前解释器，而是按 当前解释器 → `envs/default` → `.venv` → `venv` → `env`
+的顺序，找一个**实跑 `import faster_whisper` 成功**的解释器。只看目录存在是不够的——
+目录在而依赖没装很常见。
+
 ### 凭据清单
 
 | 凭据 | 环境变量 | 何时必需 | 从哪里拿 |
