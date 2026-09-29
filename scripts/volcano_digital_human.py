@@ -103,19 +103,24 @@ def make_chunks(duration: float, timeline: list[dict] | None,
         # 在两句之间的停顿中间切；没有停顿时紧贴上一句末尾。
         boundary = max(previous["end"], (previous["end"] + current["start"]) / 2.0)
         if boundary - chunk_start > max_chunk:
-            if previous["end"] - chunk_start > max_chunk:
+            if previous["end"] - previous["start"] > max_chunk:
                 fail("存在超过 %.1f 秒的单句，请先拆短口播句子。" % max_chunk)
-            # Hard-cap the cut inside the inter-sentence pause where possible.
-            boundary = min(boundary, chunk_start + max_chunk)
-            if boundary < previous["end"]:
-                boundary = previous["end"]
+            # Start the next chunk at the previous sentence boundary.
+            boundary = previous["start"]
+            if boundary <= chunk_start:
+                fail("当前片段没有可用的句界；请先拆短口播句子。")
             chunks.append((chunk_start, boundary))
             chunk_start = boundary
         previous = current
     if duration - chunk_start > max_chunk:
-        if previous["end"] - chunk_start > max_chunk:
+        if previous["end"] - previous["start"] > max_chunk:
             fail("末句超过 %.1f 秒，请先拆短口播句子。" % max_chunk)
-        fail("末尾静音导致最后一段超过 %.1f 秒；请先裁掉尾部静音。" % max_chunk)
+        if previous["start"] <= chunk_start:
+            fail("末尾静音导致最后一段超过 %.1f 秒；请先裁掉尾部静音。" % max_chunk)
+        chunks.append((chunk_start, previous["start"]))
+        chunk_start = previous["start"]
+        if duration - chunk_start > max_chunk:
+            fail("末尾静音导致最后一段超过 %.1f 秒；请先裁掉尾部静音。" % max_chunk)
     chunks.append((chunk_start, duration))
     if any(end <= start or end - start >= MAX_AUDIO_SECONDS for start, end in chunks):
         fail("切分后仍有音频段达到 35 秒；请调低 --max-chunk-seconds。")
