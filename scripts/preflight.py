@@ -12,6 +12,7 @@
   python3 preflight.py                      # 全量检查（两条配音路线都按必需校验）
   python3 preflight.py --route A            # 已定真人实录，则不要求 TTS 凭据
   python3 preflight.py --route B            # 已定火山 TTS，凭据缺失即失败
+  python3 preflight.py --route B --avatar   # TTS + OmniHuman 数字人（AK/SK 与 API 网络）
   python3 preflight.py --json               # 机器可读
   python3 preflight.py --offline            # 跳过网络探测
   python3 preflight.py --project-root .     # 指定项目根（找 tools/ 下的依赖仓库）
@@ -41,6 +42,16 @@ CREDS = [
      "where": "控制台音色列表；须已下单/授权（免费音色也需 0 元下单）"},
     {"env": "VOLC_TTS_CLUSTER", "label": "火山引擎业务集群", "for": [], "default": "volcano_tts",
      "where": "一般无需配置，默认 volcano_tts"},
+    {"env": "VOLC_ACCESSKEY", "label": "火山引擎 Access Key ID（AK）", "for": ["avatar"],
+     "where": "火山引擎控制台 → 访问控制 → 访问密钥；需开通视觉智能 CV 权限"},
+    {"env": "VOLC_SECRETKEY", "label": "火山引擎 Secret Access Key（SK）", "for": ["avatar"],
+     "where": "与 AK 同一访问密钥；仅放环境变量，不写入 creds.json 或日志"},
+    {"env": "VOLC_TOS_BUCKET", "label": "TOS Bucket（本地图片/音频自动上传时才需要）", "for": [],
+     "where": "需单独开通对象存储并创建自有 Bucket；语音合成不会自动分配"},
+    {"env": "VOLC_TOS_REGION", "label": "TOS Region（本地文件上传时才需要）", "for": [],
+     "where": "TOS 控制台中 Bucket 所在地域"},
+    {"env": "VOLC_TOS_ENDPOINT", "label": "TOS Endpoint（本地文件上传时才需要）", "for": [],
+     "where": "TOS 控制台或地域访问域名，例如 tos-cn-beijing.volces.com"},
     {"env": "GITHUB_TOKEN", "label": "GitHub 凭据（cloning 私有仓库/发布产物时才需要）", "for": [],
      "where": "公开仓库 clone 不需要；需要时用 classic PAT（repo scope）"},
 ]
@@ -61,6 +72,8 @@ PROBES = [
      "why": "faster-whisper 模型下载（HF 被拦时的镜像）"},
     {"name": "openspeech.bytedance.com", "url": "https://openspeech.bytedance.com/api/v1/tts", "for": ["B"],
      "why": "火山引擎 TTS 合成"},
+    {"name": "visual.volcengineapi.com", "url": "https://visual.volcengineapi.com", "for": ["avatar"],
+     "why": "OmniHuman 1.5 数字人任务提交与查询"},
 ]
 
 CHROME_CANDIDATES = [
@@ -339,8 +352,10 @@ def check_repos(project_root):
     return items
 
 
-def check_creds(route):
+def check_creds(route, avatar=False):
     routes = {"A": ["A"], "B": ["B"], "both": ["A", "B"]}[route]
+    if avatar:
+        routes.append("avatar")
     items = []
     for c in CREDS:
         val = os.environ.get(c["env"], "")
@@ -356,16 +371,19 @@ def check_creds(route):
     return items
 
 
-def check_network(route, offline):
+def check_network(route, offline, avatar=False):
     if offline:
         return [{"name": p["name"], "required": False, "ok": None,
                  "detail": "已跳过（--offline）", "why": p["why"]} for p in PROBES]
+    routes = {"A": ["A"], "B": ["B"], "both": ["A", "B"]}[route]
+    if avatar:
+        routes.append("avatar")
     items = []
     for p in PROBES:
         ok, detail = probe(p["url"])
         items.append({
             "name": p["name"],
-            "required": bool("B" in p["for"] and route in ("B", "both")),
+            "required": bool(set(p["for"]) & set(routes)),
             "ok": ok, "detail": detail, "why": p["why"],
             "fix": "检查网络/代理：如需代理，设置 HTTPS_PROXY（如 http://127.0.0.1:7890）",
         })
@@ -388,6 +406,7 @@ def main():
     ap.add_argument("--project-root", default=".", help="项目根目录（找 tools/ 下的依赖仓库）")
     ap.add_argument("--route", choices=["A", "B", "both"], default="both",
                     help="配音路线：A 真人实录 / B 火山引擎 TTS / both（默认，按两条都必需校验）")
+    ap.add_argument("--avatar", action="store_true", help="预检火山 OmniHuman 数字人 AK/SK 与 API 网络")
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--offline", action="store_true", help="跳过网络探测")
     args = ap.parse_args()
@@ -396,11 +415,12 @@ def main():
     report = {
         "project_root": root,
         "route": args.route,
+        "avatar": args.avatar,
         "runtime": check_runtime(),
         "media_tools": check_media_tools(root),
         "repos": check_repos(root),
-        "creds": check_creds(args.route),
-        "network": check_network(args.route, args.offline),
+        "creds": check_creds(args.route, args.avatar),
+        "network": check_network(args.route, args.offline, args.avatar),
     }
     # 由 check_runtime() 内部探测得出，故在其后补写，别在字典字面量里提前读
     report["pipeline_python"] = PIPELINE_PYTHON
@@ -419,7 +439,8 @@ def main():
         return 0 if not blockers else 2
 
     print("小无相功 · 安装预检")
-    print("项目根：%s    配音路线：%s" % (root, args.route))
+    print("项目根：%s    配音路线：%s    数字人：%s" %
+          (root, args.route, "启用预检" if args.avatar else "未启用"))
     if PIPELINE_PYTHON:
         print("流水线解释器：%s" % PIPELINE_PYTHON)
     print()
