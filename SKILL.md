@@ -113,7 +113,7 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
    - 安装本地 TOS 上传依赖：python3 -m pip install -r requirements-digital-human.txt
    - 配置 VOLC_ACCESSKEY、VOLC_SECRETKEY、VOLC_TOS_BUCKET、VOLC_TOS_REGION、VOLC_TOS_ENDPOINT
    - 生成命令：python3 scripts/volcano_digital_human.py --portrait assets/avatar.png --audio tts/output/master_norm.mp3 --timeline timeline.json --out out/digital-human --resolution 1080
-   - 长音频由脚本按时间线句界切为默认不超过 30 秒的段；超过时长的单句先拆稿重录/重合成。生成 avatar-*.mp4 与 avatar_manifest.json，Remotion 按清单时间放置片段。人物画面轨可用数字人片段，声音轨仍用唯一一条最终配音，避免双音轨。
+   - 超过 35 秒的本地长音频由脚本按时间线句界切为不超过 30 秒的段；超过时长的单句或过长尾部静音先拆短/裁剪。30–35 秒的单段可直接提交但仍必须严格短于 35 秒。生成 avatar-*.mp4 无声画面片段与 avatar_manifest.json，Remotion 按清单时间放置片段；声音轨仍只用唯一一条最终配音，避免双音轨。
    - 公网模式：--image-url https://... --audio-url https://... --duration-s 20；脚本无法切分远端长音频。数字人服务和 TOS 会产生各自费用，只有选用该功能时才调用接口。
 
 3. 真人实录路线：utterance 与原稿短语一一映射定场景窗口；用户自发加的内容编为新场景
@@ -133,7 +133,7 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 
 ### 可选音效后期
 
-Remotion 输出干净成片后才做音效混音；音效素材必须有使用权，项目不捆绑来源不明的音效库。声音计划由实际口播节奏和镜头转场决定，开头 0.5 秒内可放 hook 音效，但不为满足模板硬塞声音。
+Remotion 用唯一配音轨输出干净成片（数字人视频层静音）后才做音效混音；音效素材必须有使用权，项目不捆绑来源不明的音效库。声音计划由实际口播节奏和镜头转场决定，开头 0.5 秒内可放 hook 音效，但不为满足模板硬塞声音。
 
 计划文件示例（文件路径相对 JSON 文件）：
 
