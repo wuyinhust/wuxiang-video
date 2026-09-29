@@ -105,11 +105,17 @@ def make_chunks(duration: float, timeline: list[dict] | None,
         if boundary - chunk_start > max_chunk:
             if previous["end"] - chunk_start > max_chunk:
                 fail("存在超过 %.1f 秒的单句，请先拆短口播句子。" % max_chunk)
+            # Hard-cap the cut inside the inter-sentence pause where possible.
+            boundary = min(boundary, chunk_start + max_chunk)
+            if boundary < previous["end"]:
+                boundary = previous["end"]
             chunks.append((chunk_start, boundary))
             chunk_start = boundary
         previous = current
-    if duration - chunk_start > max_chunk and previous["end"] - chunk_start > max_chunk:
-        fail("末句超过 %.1f 秒，请先拆短口播句子。" % max_chunk)
+    if duration - chunk_start > max_chunk:
+        if previous["end"] - chunk_start > max_chunk:
+            fail("末句超过 %.1f 秒，请先拆短口播句子。" % max_chunk)
+        fail("末尾静音导致最后一段超过 %.1f 秒；请先裁掉尾部静音。" % max_chunk)
     chunks.append((chunk_start, duration))
     if any(end <= start or end - start >= MAX_AUDIO_SECONDS for start, end in chunks):
         fail("切分后仍有音频段达到 35 秒；请调低 --max-chunk-seconds。")
@@ -307,6 +313,15 @@ def download_video(url: str, target: Path) -> None:
         fail("下载数字人视频失败：%s" % type(exc).__name__)
 
 
+def strip_audio(source: Path, target: Path) -> None:
+    run_capture([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-i", str(source), "-map", "0:v:0", "-c:v", "copy",
+        "-an", "-movflags", "+faststart", str(target),
+    ])
+    source.unlink(missing_ok=True)
+
+
 def write_manifest(path: Path, manifest: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
@@ -418,7 +433,9 @@ def main() -> int:
                 args.resolution, args.prompt, args.seed, args.wait_seconds,
             )
             target = out_dir / ("avatar-%03d.mp4" % index)
-            download_video(result_url, target)
+            raw_target = out_dir / ("avatar-%03d.generated.mp4" % index)
+            download_video(result_url, raw_target)
+            strip_audio(raw_target, target)
             manifest["segments"].append({
                 "id": "avatar-%03d" % index,
                 "start_s": round(start, 3),
