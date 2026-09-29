@@ -72,8 +72,13 @@ def main() -> int:
     video = video_streams[0]
     audio = audio_streams[0]
     format_duration = float((metadata.get("format") or {}).get("duration") or 0)
-    video_duration = float(video.get("duration") or format_duration)
-    audio_duration = float(audio.get("duration") or format_duration)
+    def stream_duration(stream: dict) -> float:
+        try:
+            return float(stream.get("duration"))
+        except (TypeError, ValueError):
+            return format_duration
+    video_duration = stream_duration(video)
+    audio_duration = stream_duration(audio)
     try:
         frame_rate = float(Fraction(video.get("avg_frame_rate") or video.get("r_frame_rate")))
     except (ValueError, ZeroDivisionError):
