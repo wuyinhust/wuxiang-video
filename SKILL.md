@@ -113,17 +113,17 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
    - 安装本地 TOS 上传依赖：python3 -m pip install -r requirements-digital-human.txt
    - 配置 VOLC_ACCESSKEY、VOLC_SECRETKEY、VOLC_TOS_BUCKET、VOLC_TOS_REGION、VOLC_TOS_ENDPOINT
    - 生成命令：python3 scripts/volcano_digital_human.py --portrait assets/avatar.png --audio tts/output/master_norm.mp3 --timeline timeline.json --out out/digital-human --resolution 1080
-   - 超过 35 秒的本地长音频由脚本按时间线句界切为不超过 30 秒的段；超过时长的单句或过长尾部静音先拆短/裁剪。30–35 秒的单段可直接提交但仍必须严格短于 35 秒。生成 avatar-*.mp4 无声画面片段与 avatar_manifest.json，Remotion 按清单时间放置片段；声音轨仍只用唯一一条最终配音，避免双音轨。
+   - 达到或超过 35 秒的本地长音频需提供时间线，脚本默认按时间线切为不超过 30 秒的片段；超过 30 秒的单句或过长尾部静音会报错，需先拆短/裁剪。30–35 秒（不含 35 秒）的单段可直接提交。生成 avatar-*.mp4 无声画面片段与 avatar_manifest.json，Remotion 按清单时间放置片段；声音轨仍只用唯一一条最终配音，避免双音轨。
    - 公网模式：--image-url https://... --audio-url https://... --duration-s 20；脚本无法切分远端长音频。数字人服务和 TOS 会产生各自费用，只有选用该功能时才调用接口。
 
-3. 真人实录路线：utterance 与原稿短语一一映射定场景窗口；用户自发加的内容编为新场景
+4. 真人实录路线：utterance 与原稿短语一一映射定场景窗口；用户自发加的内容编为新场景
 
 ### 阶段 5：Remotion 成片
 1. 按 video-talkcraft 当前文档初始化（不臆造命令）；1080×1920@30fps；package.json 锁版本
 2. Remotion 是唯一主合成和终片渲染器；数字人片段只是可选视频素材，放进既有场景时间轴，不引入 HyperFrames 或剪映工程链路
-2. 场景按参考形式语言重绘；字幕固定中下部安全区、大字号、随场景明暗切换
-3. 真人画中画：圆形（右下、白边、避开字幕区）；结尾全屏段 `startFrom` 用**绝对起始帧常量**（禁用逐帧相对值）
-4. 渲染脚本化：`scripts/render_remotion.sh`（内置 cd + 系统 Chrome）；先渲代表片段自检，再渲全片
+3. 场景按参考形式语言重绘；字幕固定中下部安全区、大字号、随场景明暗切换
+4. 真人画中画：圆形（右下、白边、避开字幕区）；结尾全屏段 `startFrom` 用**绝对起始帧常量**（禁用逐帧相对值）
+5. 渲染脚本化：`scripts/render_remotion.sh`（内置 cd + 系统 Chrome）；先渲代表片段自检，再渲全片
 
 ### 阶段 6：验收交付
 1. 先运行 python3 scripts/media_qc.py final.mp4 --report qc/final.json：硬查画幅、帧率、音视频时长差、峰值；FAIL 就修复后重渲。
