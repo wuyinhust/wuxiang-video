@@ -12,9 +12,12 @@
 拆解参考视频（乾坤大挪移前三式）
   → 原创同构稿件
   → 配音（真人实录 / 火山引擎 TTS 二选一）
+  → 可选数字人出镜（授权肖像 + 最终配音）
   → 词级对齐字幕（原稿文本 + 真实语音时间，绝不用 ASR 原文）
-  → Remotion 成片（1080×1920 竖屏）
-  → 验收交付
+  → Remotion 成片（1080×1920 竖屏，主渲染器）
+  → 可选音效混音
+  → 技术验收 + AI/人工画面复核
+  → 交付
 ```
 
 ## 触发方式
@@ -35,6 +38,7 @@
 python3 scripts/preflight.py --project-root .            # 两条路线都按必需校验
 python3 scripts/preflight.py --project-root . --route A  # 已定真人实录：不要求 TTS 凭据
 python3 scripts/preflight.py --project-root . --route B  # 已定火山 TTS：凭据缺失即失败
+python3 scripts/preflight.py --project-root . --route B --avatar  # TTS + 火山数字人
 python3 scripts/preflight.py --project-root . --json     # 机器可读
 ```
 
@@ -84,6 +88,8 @@ faster-whisper 等依赖装在隔离 venv 里，而 PATH 中 `python3` 往往先
 | 火山引擎 Access Token | `VOLC_TTS_ACCESS_TOKEN` | 路线 B | 同上（与 AppID 同页） |
 | 火山引擎音色 voice_type | `VOLC_TTS_VOICE` | 路线 B | 控制台音色列表；**须已下单/授权** |
 | 业务集群 | `VOLC_TTS_CLUSTER` | 一般不用 | 默认 `volcano_tts` |
+| 火山视觉 API AK/SK | `VOLC_ACCESSKEY` / `VOLC_SECRETKEY` | 选择火山数字人时 | 火山引擎控制台 → 访问控制 → 访问密钥；需有视觉智能 CV 权限 |
+| TOS 桶 | `VOLC_TOS_BUCKET` / `VOLC_TOS_REGION` / `VOLC_TOS_ENDPOINT` | 本地肖像/音频自动上传时 | 单独开通对象存储并创建 Bucket；语音合成不会自动分配 |
 | GitHub 凭据 | `GITHUB_TOKEN` | 仅私有仓库 / 发布产物 | classic PAT（`repo` scope） |
 
 取值优先级：命令行参数 > `--config creds.json` > 环境变量。模板见 `scripts/creds.example.json`。
@@ -99,7 +105,10 @@ scripts/
 ├── install_ffmpeg.sh         装独立 ffmpeg/ffprobe（SHA-256 校验，免 sudo / 免 Homebrew）
 ├── creds.example.json        凭据模板（复制为 creds.json 并填入）
 ├── align_subtitles.py        字幕对齐器：原稿 + faster-whisper 词级时间戳 → SRT
-├── volcano_tts_batch.py      火山引擎 TTS 批量配音（路线 B）+ 主音轨拼接 + 音量归一
+├── volcano_tts_batch.py      火山引擎 TTS 批量配音 + 主音轨拼接 + 音量归一
+├── volcano_digital_human.py 火山 OmniHuman 1.5 数字人片段生成（可选）
+├── sfx_mix.py                音效混音、口播侧链压低与峰值限制（可选）
+├── media_qc.py               成片技术验收报告
 └── render_remotion.sh        Remotion 一键渲染（系统 Chrome，免 Headless 下载）
 ```
 
@@ -111,36 +120,82 @@ scripts/
 - ffmpeg / ffprobe —— 用 `scripts/install_ffmpeg.sh` 装一份独立的（**不要**依赖其他 skill 的捆绑件）
 - faster-whisper（词级转写）
 - 路线 B 另需火山引擎语音合成凭据（AppID / Access Token / 音色），纯 HTTPS 调用、无额外 pip 依赖
+- 数字人可选：火山 OmniHuman 1.5 需要视觉服务 AK/SK；本地文件上传 TOS 时另装 requirements-digital-human.txt，并使用自有 Bucket
 
-## 配音路线（二选一，不混用）
+## 声音来源与出镜画面（分开决策）
 
-| | 路线 A · 真人实录 | 路线 B · 火山引擎 TTS |
-|---|---|---|
-| 适用 | 首选，效果天花板 | 无真人出镜时的机器路线 |
-| 前置 | 带时间戳逐字稿 | AppID / Access Token / 音色 voice_type |
-| 命令 | 用户录制 → ffmpeg 提取音频 | `volcano_tts_batch.py --check` 先自检 |
+一条视频的**声音来源**仍二选一：真人实录，或火山引擎 TTS。是否使用数字人是另一个选择：可以不出镜、使用授权真人视频，或用授权肖像和已完成的配音生成火山数字人。数字人可驱动真人录音或 TTS 音频。
 
-路线 B 完整流程：
+### 火山 OmniHuman 1.5 数字人
 
-```bash
-export VOLC_TTS_APPID=...
-export VOLC_TTS_ACCESS_TOKEN=...
-export VOLC_TTS_VOICE=zh_male_M392_conversation_wvae_bigtts
+模型用单张图片和音频生成一段出镜视频。火山语音合成服务不附带 TOS 桶；TOS 是要单独开通、由用户创建的对象存储。接口要求图片和音频可通过 HTTPS 访问。
 
-python3 scripts/volcano_tts_batch.py --check          # 冒烟自检：一次验证三项凭据
+本地文件模式会由脚本自动上传到私有 TOS，生成限时读取链接；任务完成后尝试删除输入对象。需要设置：
 
-python3 scripts/volcano_tts_batch.py segments.json --out tts/output \
-    --speed 1.15 --master tts/output/master.mp3 --normalize
-```
+~~~bash
+export VOLC_ACCESSKEY=...
+export VOLC_SECRETKEY=...
+export VOLC_TOS_BUCKET=...
+export VOLC_TOS_REGION=cn-beijing
+export VOLC_TOS_ENDPOINT=tos-cn-beijing.volces.com
 
-凭据只走环境变量或 `--config creds.json`，不写入源码与仓库。
+python3 -m pip install -r requirements-digital-human.txt
+python3 scripts/preflight.py --route B --avatar
+python3 scripts/volcano_digital_human.py \
+  --portrait assets/avatar.png \
+  --audio tts/output/master_norm.mp3 \
+  --timeline timeline.json \
+  --out out/digital-human \
+  --resolution 1080
+~~~
+
+每条 API 音频必须**严格短于 35 秒**。本地长音频需提供 align_subtitles.py 生成的 timeline.json；脚本按句界分段，默认每段最多 30 秒，输出 avatar-001.mp4 等片段和 avatar_manifest.json，供 Remotion 按时间编排。超长单句必须先拆短。已经有公网 HTTPS 文件时可直接传 --image-url、--audio-url 和 --duration-s；这种模式仅支持小于 35 秒的单段音频。
+
+火山数字人 API 使用 AK/SK，和 TTS 的 AppID/Access Token 是两套凭据。不要把密钥写入脚本或仓库。数字人输入图必须有使用授权。API 服务开通、计费和接口字段以[火山 OmniHuman 1.5 官方 API Explorer](https://api.volcengine.com/api-explorer/debug?action=JimengRealmanAvatarPictureOmniV15SubmitTask&groupName=Jimeng+AI+Public+Beta&serviceCode=cv&version=2024-06-06)为准。
+
+### 音效混音（可选）
+
+Remotion 先渲染包含配音的干净成片，再用有使用权的音效素材做后期混音。不要把音效嵌进 Remotion 场景音轨，也不附带来源不明的素材库。
+
+音效计划示例，文件路径相对 JSON 文件：
+
+~~~json
+{
+  "events": [
+    {
+      "id": "hook",
+      "file": "assets/sfx/hit.wav",
+      "start_s": 0.2,
+      "gain_db": -16,
+      "purpose": "hook"
+    }
+  ]
+}
+~~~
+
+~~~bash
+python3 scripts/sfx_mix.py \
+  --video out/render.mp4 \
+  --plan sfx_plan.json \
+  --timeline timeline.json \
+  --out out/final.mp4
+~~~
+
+脚本会把音效压在配音之下，限制混合峰值至约 -3 dBFS，并写出 .sfx.json 混音记录。音效库缺失或没有合适落点时，跳过音效，不造占位音。
+
+### 成片技术验收
+
+~~~bash
+python3 scripts/media_qc.py out/final.mp4 --report qc/final.json
+~~~
+
+检查画幅、帧率、音视频时长差和音轨峰值。此技术报告不代表视觉验收通过；画面内容需另做 AI/人工抽帧复核。
 
 ## 核心设计
 
 1. **先预检再开工**：新机器装完先跑 `preflight.py`，凭据一次要齐——走到阶段 3 才发现没有
    配音凭据，是最大的返工来源。
-2. **第〇步先锁决策**：配音路线（真人实录 / 火山引擎 TTS，**二选一，不混用**）与合规边界
-   （录屏界面与参考片真人肖像不进成片）开工前定死。
+2. **第〇步先锁决策**：声音来源（真人实录 / 火山引擎 TTS，**二选一，不混用**）、是否需要数字人出镜、肖像授权及证据边界，开工前定好。
 3. **自动切镜不可信**：每 2 秒补抽帧，按叙事人工细分 8–10 段。
 4. **字幕铁律**：字幕 = 原稿文本 + 真实语音词级时间，绝不直接用 ASR 原文
    （生造词必被转写错）。
