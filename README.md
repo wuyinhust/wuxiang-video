@@ -100,6 +100,7 @@ faster-whisper 等依赖装在隔离 venv 里，而 PATH 中 `python3` 往往先
 ```
 SKILL.md                      技能主文档（预检 + 六段流水线 + 决策点 + 避坑清单）
 .gitignore                    预置凭据与生成物忽略规则
+requirements-digital-human.txt  本地 TOS 上传 SDK（数字人本地文件模式按需安装）
 scripts/
 ├── preflight.py              安装预检：凭据 / 运行时 / 媒体工具链 / 依赖仓库 / 网络（只读）
 ├── install_ffmpeg.sh         装独立 ffmpeg/ffprobe（SHA-256 校验，免 sudo / 免 Homebrew）
@@ -149,7 +150,7 @@ python3 scripts/volcano_digital_human.py \
   --resolution 1080
 ~~~
 
-每条 API 音频必须**严格短于 35 秒**。超过 35 秒的本地配音需提供 align_subtitles.py 生成的 timeline.json；脚本按句界切成最长 30 秒的段，并对超过 30 秒的单句或尾部静音报错，需先拆短或裁剪。30–35 秒的单段可以直接提交，但仍必须小于 35 秒。脚本输出 avatar-001.mp4 等**无声画面片段**和 avatar_manifest.json，Remotion 按清单编排；最终配音只在 Remotion 音轨中放一次。已有公网 HTTPS 文件可传 --image-url、--audio-url 和 --duration-s；该模式仅支持小于 35 秒的单段音频。
+每条 API 音频必须**严格短于 35 秒**。达到或超过 35 秒的本地配音需提供 align_subtitles.py 生成的 timeline.json；脚本默认按时间线切成最长 30 秒的段，并对超过 30 秒的单句或无法安全切分的尾部静音报错，需先拆短或裁剪。30–35 秒（不含 35 秒）的单段可以直接提交。脚本输出 avatar-001.mp4 等**无声画面片段**和 avatar_manifest.json，Remotion 按清单编排；最终配音只在 Remotion 音轨中放一次。已有公网 HTTPS 文件可传 --image-url、--audio-url 和 --duration-s；该模式仅支持小于 35 秒的单段音频。
 
 火山数字人 API 使用 AK/SK，和 TTS 的 AppID/Access Token 是两套凭据。不要把密钥写入脚本或仓库。数字人输入图必须有使用授权。API 服务开通、计费和接口字段以[火山 OmniHuman 1.5 官方 API Explorer](https://api.volcengine.com/api-explorer/debug?action=JimengRealmanAvatarPictureOmniV15SubmitTask&groupName=Jimeng+AI+Public+Beta&serviceCode=cv&version=2024-06-06)为准。
 
