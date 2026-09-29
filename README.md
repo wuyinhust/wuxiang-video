@@ -149,13 +149,13 @@ python3 scripts/volcano_digital_human.py \
   --resolution 1080
 ~~~
 
-每条 API 音频必须**严格短于 35 秒**。本地长音频需提供 align_subtitles.py 生成的 timeline.json；脚本按句界分段，默认每段最多 30 秒，输出 avatar-001.mp4 等片段和 avatar_manifest.json，供 Remotion 按时间编排。超长单句必须先拆短。已经有公网 HTTPS 文件时可直接传 --image-url、--audio-url 和 --duration-s；这种模式仅支持小于 35 秒的单段音频。
+每条 API 音频必须**严格短于 35 秒**。超过 35 秒的本地配音需提供 align_subtitles.py 生成的 timeline.json；脚本按句界切成最长 30 秒的段，并对超过 30 秒的单句或尾部静音报错，需先拆短或裁剪。30–35 秒的单段可以直接提交，但仍必须小于 35 秒。脚本输出 avatar-001.mp4 等**无声画面片段**和 avatar_manifest.json，Remotion 按清单编排；最终配音只在 Remotion 音轨中放一次。已有公网 HTTPS 文件可传 --image-url、--audio-url 和 --duration-s；该模式仅支持小于 35 秒的单段音频。
 
 火山数字人 API 使用 AK/SK，和 TTS 的 AppID/Access Token 是两套凭据。不要把密钥写入脚本或仓库。数字人输入图必须有使用授权。API 服务开通、计费和接口字段以[火山 OmniHuman 1.5 官方 API Explorer](https://api.volcengine.com/api-explorer/debug?action=JimengRealmanAvatarPictureOmniV15SubmitTask&groupName=Jimeng+AI+Public+Beta&serviceCode=cv&version=2024-06-06)为准。
 
 ### 音效混音（可选）
 
-Remotion 先渲染包含配音的干净成片，再用有使用权的音效素材做后期混音。不要把音效嵌进 Remotion 场景音轨，也不附带来源不明的素材库。
+Remotion 先用单独的最终配音轨渲染干净成片（数字人画面片段保持静音），再用有使用权的音效素材做后期混音。不要把音效嵌进 Remotion 场景音轨，也不附带来源不明的素材库。
 
 音效计划示例，文件路径相对 JSON 文件：
 
@@ -189,7 +189,7 @@ python3 scripts/sfx_mix.py \
 python3 scripts/media_qc.py out/final.mp4 --report qc/final.json
 ~~~
 
-检查画幅、帧率、音视频时长差和音轨峰值。此技术报告不代表视觉验收通过；画面内容需另做 AI/人工抽帧复核。
+检查画幅、帧率、音视频时长差和音轨峰值。此技术报告不代表视觉验收通过；画面内容需另做 AI/人工抽帧复核。若任务超时中断，上传对象可能仍被数字人任务读取；给私有 TOS 桶配置生命周期清理规则。
 
 ## 核心设计
 
