@@ -1,6 +1,6 @@
 ---
 name: xiaowuxianggong
-description: 小无相功——基于乾坤大挪移（qiankun-video-shift）的视频复刻制作流水线。拆解参考视频的形式语言 → 原创同构稿件 → 配音（真人实录 / 火山引擎 TTS，二选一）→ 词级对齐字幕 → Remotion 成片 → 验收交付。当用户说"用小无相功流程做 XX 视频"、"复刻/模仿一条参考视频"、"拆解爆款视频并仿拍一条"时触发。
+description: 小无相功——基于乾坤大挪移的视频复刻制作流水线。拆解参考视频形式语言 → 原创同构稿件 → 配音（真人实录 / 火山引擎 TTS 二选一）→ 词级字幕与时间线 → 可选火山 OmniHuman 数字人 → Remotion 成片 → 音效后期与验收交付。当用户说"用小无相功流程做 XX 视频"、"复刻/模仿一条参考视频"、"拆解爆款视频并仿拍一条"时触发。
 metadata:
   agent_created: true
 ---
@@ -9,7 +9,7 @@ metadata:
 
 以上乘内力催动乾坤大挪移：乾坤大挪移负责"拆解与还原"，小无相功负责"模仿与重生"——把参考视频的叙事结构、节奏、形式语言迁移到全新主题的成片。
 
-**依赖**：乾坤大挪移仓库（`git clone https://github.com/wuyinhust/qiankun-video-shift.git tools/qiankun-video-shift`，按其 SKILL.md 执行前三式）、video-talkcraft（Remotion 剪辑，`git clone https://github.com/Vincentwei1021/video-talkcraft.git tools/video-talkcraft`）、Python 3 + ffmpeg/ffprobe + Node 22+、faster-whisper（词级转写）。路线 B 只需火山引擎语音合成的三项凭据，纯 HTTPS 调用、无额外 pip 依赖。
+**依赖**：乾坤大挪移仓库（`git clone https://github.com/wuyinhust/qiankun-video-shift.git tools/qiankun-video-shift`，按其 SKILL.md 执行前三式）、video-talkcraft（Remotion 剪辑，`git clone https://github.com/Vincentwei1021/video-talkcraft.git tools/video-talkcraft`）、Python 3 + ffmpeg/ffprobe + Node 22+、faster-whisper（词级转写）。路线 B 只需火山引擎语音合成的三项凭据，纯 HTTPS 调用、无额外 pip 依赖。可选数字人需要火山视觉服务 AK/SK；本地肖像/音频上传另需用户自己的 TOS 桶和 TOS Python SDK。
 
 ## 安装后第一件事：跑预检、把凭据一次要齐（新机器必做）
 
@@ -19,6 +19,7 @@ metadata:
 python3 scripts/preflight.py --project-root .            # 两条路线都按必需校验
 python3 scripts/preflight.py --project-root . --route A  # 已定真人实录：不要求 TTS 凭据
 python3 scripts/preflight.py --project-root . --route B  # 已定火山 TTS：凭据缺失即失败
+python3 scripts/preflight.py --project-root . --route B --avatar  # 另检查数字人 AK/SK 与 API 网络
 python3 scripts/preflight.py --project-root . --json     # 机器可读（便于程序化判断）
 ```
 
@@ -29,7 +30,7 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 | 运行时 | Python ≥3.10、Node ≥22、npm、git、faster-whisper、系统 Chrome |
 | 媒体工具链 | 复用乾坤大挪移 `scripts/check_environment.py --json`（ffmpeg/ffprobe/yt-dlp） |
 | 依赖仓库 | `tools/qiankun-video-shift`、`tools/video-talkcraft` 是否就位及 SHA |
-| 网络 | github.com、hf-mirror.com、（路线 B）openspeech.bytedance.com |
+| 网络 | github.com、hf-mirror.com、（路线 B）openspeech.bytedance.com、（--avatar）visual.volcengineapi.com |
 
 ### 凭据清单（一次性索取，禁止在流水线中途要）
 
@@ -39,6 +40,8 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 | 火山引擎 Access Token | `VOLC_TTS_ACCESS_TOKEN` | 路线 B | 同上（与 AppID 同页） |
 | 火山引擎音色 voice_type | `VOLC_TTS_VOICE` | 路线 B | 控制台音色列表；**须已下单/授权**（免费音色也要 0 元下单） |
 | 业务集群 | `VOLC_TTS_CLUSTER` | 一般不用 | 默认 `volcano_tts` |
+| 火山视觉 API AK/SK | `VOLC_ACCESSKEY` / `VOLC_SECRETKEY` | 启用数字人时 | 火山引擎控制台 → 访问控制 → 访问密钥；须有 CV 调用权限 |
+| TOS 桶 | `VOLC_TOS_BUCKET` / `VOLC_TOS_REGION` / `VOLC_TOS_ENDPOINT` | 本地图片/音频自动上传时 | 单独开通并创建自有 TOS 桶；语音合成不附带桶 |
 | GitHub 凭据 | `GITHUB_TOKEN` | 仅私有仓库 clone / 发布产物 | classic PAT（`repo` scope） |
 
 取值优先级：命令行参数 > `--config creds.json` > 环境变量。模板见 `scripts/creds.example.json`。
@@ -68,14 +71,15 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 预检因此不假定当前解释器，而是按 当前解释器 → `envs/default` → `.venv` → `venv` → `env`
 的顺序找一个**实跑 `import faster_whisper` 成功**的解释器（只看目录存在不够，
 目录在而依赖没装很常见）。
-3. 全绿后再向用户确认配音路线与合规边界，进入第〇步
+3. 全绿后再向用户确认声音路线、是否生成数字人、肖像授权和证据边界，进入第〇步
 
 ## 第〇步：开工前必须锁定的两个决策（最重要，跳过必返工）
 
-1. **配音路线（二选一，先问用户）**——一条片子只走一条路线，不混用；**不使用 edge-tts / IndexTTS**：
-   - **A. 真人实录**（首选，效果天花板）：按"带时间戳逐字稿"录视频；音画同源，可做圆形画中画 + 结尾全屏真人
-   - **B. 火山引擎 TTS**（无真人时的机器路线）：需用户提供 **AppID / Access Token / 音色 voice_type** 三项；凭据走环境变量或 `--config`，**不入源码、不入仓库**
-2. **合规边界**：录屏界面与参考片真人肖像**不进成片**；演示段用真实拆解数据重绘。此条在拆解阶段定调。
+1. **声音来源（二选一，先问用户）**——一条片子只用一条声音路线，不混用；**不使用 edge-tts / IndexTTS**：
+   - **A. 真人实录**：提供真实配音/口播源片，保留其原始词级时间线
+   - **B. 火山引擎 TTS**：需 **AppID / Access Token / 音色 voice_type**；凭据走环境变量或 `--config`，不入源码与仓库
+2. **出镜方式单独决策**：不出镜、授权真人实拍，或用有使用授权的肖像 + 最终配音生成火山数字人。数字人可以驱动 A 或 B 的配音，不替代 Remotion。
+3. **合规与证据边界**：参考片只迁移结构和形式语言；参考片真人肖像不进成片，除非用户明确提供使用授权。真实产品/网页/数据须用可核验素材，不能伪造界面或证据；敏感信息先打码。上传至 TOS 或数字人服务的图片/音频须经用户授权。
 
 ## 六段流水线
 
@@ -84,9 +88,10 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 2. `segment_video.py` 自动分镜 + 提取 audio.wav；**自动切镜不可信**，必须每 2 秒补抽帧、按叙事人工细分为 8–10 段
 3. faster-whisper（small/int8，词级时间戳）转写 audio.wav，与画面字幕互证，回写 analysis.json 段边界与口播
 4. 产出 analysis.json + report.md（结构模板：钩子公式/信息组织/呈现方式），`validate_analysis.py --check-files` 必须通过
+5. 登记参考素材来源与采集日期；参考只用于结构分析，不复制原片人脸、界面或带版权的音视频；凡含真实产品/网页/数据的口播句，记录实际证据来源。截图/录屏入片前检查账号、邮箱、电话、令牌与客户信息并打码；不确定是否可公开的内容不上传。
 
 ### 阶段 2：原创稿件
-沿用参考叙事顺序与表达形态，替换为新主题**真实**内容（演示素材优先用本项目真实拆解产物，不虚构）。交付：口播稿（仅朗读内容）+ 段落对应表 + 每段画面/屏幕文字/强调/停顿建议。信息密度对标参考（约 4–4.5 字/秒）。
+沿用参考叙事顺序与表达形态，替换为新主题**真实**内容（演示素材优先用本项目真实拆解产物，不虚构）。每个事实、数字、评价或产品能力都须能回到真实来源；证据不足时删去或明确标成观点。交付：口播稿（仅朗读内容）+ 段落对应表 + 每段画面/屏幕文字/强调/停顿建议。信息密度对标参考（约 4–4.5 字/秒）。
 
 ### 阶段 3：配音（按第〇步决策执行，二选一）
 - **路线 A（真人实录）**：
@@ -103,17 +108,40 @@ python3 scripts/preflight.py --project-root . --json     # 机器可读（便于
 ### 阶段 4：对齐与字幕（铁律：字幕 = 原稿文本 + 真实语音词级时间，绝不用 ASR 原文）
 1. 对真实配音转写回检：与原稿比对字数，确认无漏字/重复（ASR 对生造词的同音误识不算错）
 2. `scripts/align_subtitles.py --transcript transcript.json --script script.txt --out-srt subtitles.srt --out-timeline timeline.json`（difflib 字符对齐 → 词级时间映射回原稿 → 按原稿标点切句，不按字数均分）
-3. 真人实录路线：utterance 与原稿短语一一映射定场景窗口；用户自发加的内容编为新场景
+
+3. **可选数字人**：词级时间线确认后再生成，确保驱动音频与最终字幕来自同一条配音。接口：火山 OmniHuman 1.5；每次传入音频必须严格短于 35 秒。短音频可直接传公开 HTTPS URL；本地文件走独立 TOS。
+   - 安装本地 TOS 上传依赖：python3 -m pip install -r requirements-digital-human.txt
+   - 配置 VOLC_ACCESSKEY、VOLC_SECRETKEY、VOLC_TOS_BUCKET、VOLC_TOS_REGION、VOLC_TOS_ENDPOINT
+   - 生成命令：python3 scripts/volcano_digital_human.py --portrait assets/avatar.png --audio tts/output/master_norm.mp3 --timeline timeline.json --out out/digital-human --resolution 1080
+   - 达到或超过 35 秒的本地长音频需提供时间线，脚本默认按时间线切为不超过 30 秒的片段；超过 30 秒的单句或过长尾部静音会报错，需先拆短/裁剪。30–35 秒（不含 35 秒）的单段可直接提交。生成 avatar-*.mp4 无声画面片段与 avatar_manifest.json，Remotion 按清单时间放置片段；声音轨仍只用唯一一条最终配音，避免双音轨。
+   - 公网模式：--image-url https://... --audio-url https://... --duration-s 20；脚本无法切分远端长音频。数字人服务和 TOS 会产生各自费用，只有选用该功能时才调用接口。
+
+4. 真人实录路线：utterance 与原稿短语一一映射定场景窗口；用户自发加的内容编为新场景
 
 ### 阶段 5：Remotion 成片
 1. 按 video-talkcraft 当前文档初始化（不臆造命令）；1080×1920@30fps；package.json 锁版本
-2. 场景按参考形式语言重绘；字幕固定中下部安全区、大字号、随场景明暗切换
-3. 真人画中画：圆形（右下、白边、避开字幕区）；结尾全屏段 `startFrom` 用**绝对起始帧常量**（禁用逐帧相对值）
-4. 渲染脚本化：`scripts/render_remotion.sh`（内置 cd + 系统 Chrome）；先渲代表片段自检，再渲全片
+2. Remotion 是唯一主合成和终片渲染器；数字人片段只是可选视频素材，放进既有场景时间轴，不引入 HyperFrames 或剪映工程链路
+3. 场景按参考形式语言重绘；字幕固定中下部安全区、大字号、随场景明暗切换
+4. 真人画中画：圆形（右下、白边、避开字幕区）；结尾全屏段 `startFrom` 用**绝对起始帧常量**（禁用逐帧相对值）
+5. 渲染脚本化：`scripts/render_remotion.sh`（内置 cd + 系统 Chrome）；先渲代表片段自检，再渲全片
 
 ### 阶段 6：验收交付
-逐项：录屏界面零残留｜形式/节奏逐段可对应参考｜无虚构｜volumedetect 无削波无静音｜字幕与口播一致｜每场景至少抽 1 帧验收。
-交付：成片 MP4｜拆解报告 + analysis.json｜稿件 + 对应表｜配音音频｜SRT + timeline｜Remotion 工程｜REPRODUCE.md（仓库 SHA + 依赖版本 + 步骤）。
+1. 先运行 python3 scripts/media_qc.py final.mp4 --report qc/final.json：硬查画幅、帧率、音视频时长差、峰值；FAIL 就修复后重渲。
+2. AI/人工复核开头、中段、结尾、每个场景切换和数字人代表帧：事实是否有证据、截图是否为真、敏感字是否打码、字幕是否可读、人物是否挡住关键内容、口型是否贴合唯一配音。AI 标出的具体问题须打开对应帧再裁定；无法检查的项目标记「未检查」，不得写成通过。
+3. 逐项核对：录屏界面零残留｜形式/节奏可对应参考｜无虚构｜口播清晰无削波｜字幕与口播一致｜每场景至少抽 1 帧。
+交付：成片 MP4｜QC JSON + 视觉复核记录｜拆解报告 + analysis.json｜稿件 + 对应表｜配音音频｜SRT + timeline｜Remotion 工程｜REPRODUCE.md（仓库 SHA + 依赖版本 + 步骤）。
+
+### 可选音效后期
+
+Remotion 用唯一配音轨输出干净成片（数字人视频层静音）后才做音效混音；音效素材必须有使用权，项目不捆绑来源不明的音效库。声音计划由实际口播节奏和镜头转场决定，开头 0.5 秒内可放 hook 音效，但不为满足模板硬塞声音。
+
+计划文件示例（文件路径相对 JSON 文件）：
+
+~~~json
+{"events":[{"id":"hook","file":"assets/sfx/hit.wav","start_s":0.2,"gain_db":-16,"purpose":"hook"}]}
+~~~
+
+运行：python3 scripts/sfx_mix.py --video render.mp4 --plan sfx_plan.json --timeline timeline.json --out final.mp4。脚本会在口播期间自动压低音效、把混合峰值限制到约 -3 dBFS，并生成 .sfx.json 记录。无合适素材则保持干净配音，不生成占位音。
 
 ## 避坑清单（按收益排序）
 
